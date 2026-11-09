@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Undertale Battle Simulation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background-color: black;
+            color: white;
+            font-family: 'DotGothic16', sans-serif;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        #game-container {
+            width: 100%;
+            max-width: 640px;
+            height: 100%;
+            max-height: 480px;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            padding: 1rem;
+            box-sizing: border-box;
+        }
+
+        /* 敵のスプライト（CSSで作る簡易的なおばけ） */
+        #enemy-area {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            animation: float 3s ease-in-out infinite;
+        }
+
+        .ghost {
+            width: 80px;
+            height: 100px;
+            background-color: white;
+            border-radius: 40px 40px 10px 10px;
+            position: relative;
+        }
+        .ghost::before, .ghost::after {
+            content: '';
+            position: absolute;
+            background-color: black;
+            width: 12px;
+            height: 20px;
+            border-radius: 50%;
+            top: 30px;
+        }
+        .ghost::before { left: 20px; }
+        .ghost::after { right: 20px; }
+        .ghost-tears {
+            position: absolute;
+            background-color: #60a5fa;
+            width: 6px;
+            height: 15px;
+            border-radius: 50%;
+            top: 55px;
+            left: 23px;
+            box-shadow: 28px 0 #60a5fa;
+            opacity: 0.7;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-15px); }
+        }
+
+        /* UI領域 */
+        #ui-area {
+            height: 220px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+        }
+
+        /* ボックス（ダイアログ または 戦闘エリア） */
+        .box-container {
+            width: 100%;
+            height: 140px;
+            border: 4px solid white;
+            padding: 16px;
+            box-sizing: border-box;
+            position: relative;
+            margin-bottom: 10px;
+        }
+
+        #dialogue-text {
+            font-size: 1.5rem;
+            line-height: 2rem;
+            white-space: pre-wrap;
+        }
+
+        #battle-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: none;
+            touch-action: none; /* スマホでのスクロール防止 */
+        }
+
+        /* ステータスバー */
+        #status-bar {
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 1.2rem;
+            margin-bottom: 10px;
+            padding: 0 10px;
+        }
+
+        .hp-bar-bg {
+            background-color: red;
+            width: 60px;
+            height: 20px;
+            display: inline-block;
+            margin: 0 10px;
+        }
+        .hp-bar-fill {
+            background-color: #fbbf24; /* Yellow */
+            width: 100%;
+            height: 100%;
+        }
+
+        /* アクションボタン */
+        #action-buttons {
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .action-btn {
+            border: 2px solid #f97316; /* 選択時はオレンジ */
+            color: #f97316;
+            padding: 8px 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 1.2rem;
+            transition: all 0.2s;
+            background: black;
+        }
+        .action-btn:hover, .action-btn.active {
+            border-color: #fbbf24;
+            color: #fbbf24;
+        }
+        .action-btn.disabled {
+            border-color: #555;
+            color: #555;
+            cursor: not-allowed;
+        }
+
+        /* 攻撃時の点滅エフェクト */
+        .damage-flash {
+            animation: flash 0.2s 3;
+        }
+        @keyframes flash {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        #game-over {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: black;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+        }
+        #game-over h1 {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <!-- 敵エリア -->
+        <div id="enemy-area">
+            <div class="ghost">
+                <div class="ghost-tears"></div>
+            </div>
+        </div>
+
+        <!-- UIエリア -->
+        <div id="ui-area">
+            <!-- ダイアログ / 戦闘ボックス -->
+            <div class="box-container" id="box-container">
+                <div id="dialogue-text">* なぞの おばけ が あらわれた！<br>  [たたかう] を えらんでね。</div>
+                <canvas id="battle-canvas"></canvas>
+            </div>
+
+            <!-- ステータス -->
+            <div id="status-bar">
+                <span>PLAYER&nbsp;&nbsp;LV 1</span>
+                <span style="display:flex; align-items:center;">
+                    HP 
+                    <div class="hp-bar-bg"><div class="hp-bar-fill" id="hp-fill"></div></div>
+                    <span id="hp-text">20 / 20</span>
+                </span>
+            </div>
+
+            <!-- ボタン -->
+            <div id="action-buttons">
+                <button class="action-btn active" id="btn-fight" onclick="startBattle()">
+                    <span id="heart-fight">♥</span> たたかう
+                </button>
+                <button class="action-btn disabled">
+                    <span>♥</span> こうどう
+                </button>
+                <button class="action-btn disabled">
+                    <span>♥</span> アイテム
+                </button>
+                <button class="action-btn disabled">
+                    <span>♥</span> みのがす
+                </button>
+            </div>
+        </div>
+
+        <!-- ゲームオーバー画面 -->
+        <div id="game-over">
+            <h1>GAME OVER</h1>
+            <p>ケツイを　ちからに　かえるんだ。</p>
+            <button class="mt-8 border-2 border-white px-4 py-2 hover:text-yellow-400 hover:border-yellow-400 transition" onclick="location.reload()">
+                リトライ
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // ゲームステート
+        let hp = 20;
+        const maxHp = 20;
+        let isBattling = false;
+        let animationId;
+        
+        // HTML要素
+        const canvas = document.getElementById('battle-canvas');
+        const ctx = canvas.getContext('2d');
+        const dialogue = document.getElementById('dialogue-text');
+        const hpFill = document.getElementById('hp-fill');
+        const hpText = document.getElementById('hp-text');
+        const gameOverScreen = document.getElementById('game-over');
+        const heartFightBtn = document.getElementById('heart-fight');
+        
+        // ソウル（プレイヤー）
+        const soul = {
+            x: 0,
+            y: 0,
+            size: 12,
+            speed: 3,
+            color: '#ef4444' // 赤
+        };
+
+        // 攻撃（弾）
+        let bullets = [];
+        let battleTimer = 0;
+        const battleDuration = 600; // フレーム数 (約10秒)
+
+        // キーボード入力状態
+        const keys = {
+            ArrowUp: false,
+            ArrowDown: false,
+            ArrowLeft: false,
+            ArrowRight: false
+        };
+
+        // イベントリスナー
+        window.addEventListener('keydown', (e) => {
+            if(keys.hasOwnProperty(e.key)) {
+                keys[e.key] = true;
+                e.preventDefault();
+            }
+        });
+        window.addEventListener('keyup', (e) => {
+            if(keys.hasOwnProperty(e.key)) {
+                keys[e.key] = false;
+            }
+        });
+
+        // スマホ用タッチ操作
+        canvas.addEventListener('touchmove', (e) => {
+            if(!isBattling) return;
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const touch = e.touches[0];
+            soul.x = touch.clientX - rect.left;
+            soul.y = touch.clientY - rect.top;
+            clampSoul();
+        });
+
+        // リサイズ時のキャンバス調整
+        function resizeCanvas() {
+            const container = document.getElementById('box-container');
+            // パディングとボーダー分を引く
+            canvas.width = container.clientWidth - 8;
+            canvas.height = container.clientHeight - 8;
+            soul.x = canvas.width / 2;
+            soul.y = canvas.height / 2;
+        }
+
+        // 戦闘開始
+        function startBattle() {
+            if (isBattling) return;
+            
+            // UIの切り替え
+            dialogue.style.display = 'none';
+            canvas.style.display = 'block';
+            heartFightBtn.style.visibility = 'hidden'; // ボタンのハートを消す
+            
+            resizeCanvas();
+            isBattling = true;
+            battleTimer = 0;
+            bullets = [];
+            
+            // ゲームループ開始
+            update();
+        }
+
+        // 戦闘終了
+        function endBattle() {
+            isBattling = false;
+            cancelAnimationFrame(animationId);
+            canvas.style.display = 'none';
+            dialogue.style.display = 'block';
+            dialogue.innerHTML = "* おばけ は しずかに ないている。<br>  (ターン 終了)";
+            heartFightBtn.style.visibility = 'visible';
+        }
+
+        // ハートの描画関数
+        function drawHeart(x, y, size) {
+            ctx.fillStyle = soul.color;
+            ctx.beginPath();
+            const topCurveHeight = size * 0.3;
+            ctx.moveTo(x, y + topCurveHeight);
+            // 左半分のカーブ
+            ctx.bezierCurveTo(
+                x, y, 
+                x - size / 2, y, 
+                x - size / 2, y + topCurveHeight
+            );
+            // 左下へ
+            ctx.bezierCurveTo(
+                x - size / 2, y + (size + topCurveHeight) / 2, 
+                x, y + (size + topCurveHeight) / 2, 
+                x, y + size
+            );
+            // 右下から上へ
+            ctx.bezierCurveTo(
+                x, y + (size + topCurveHeight) / 2, 
+                x + size / 2, y + (size + topCurveHeight) / 2, 
+                x + size / 2, y + topCurveHeight
+            );
+            // 右半分のカーブ
+            ctx.bezierCurveTo(
+                x + size / 2, y, 
+                x, y, 
+                x, y + topCurveHeight
+            );
+            ctx.fill();
+        }
+
+        // プレイヤーの移動制限
+        function clampSoul() {
+            if (soul.x < soul.size/2) soul.x = soul.size/2;
+            if (soul.x > canvas.width - soul.size/2) soul.x = canvas.width - soul.size/2;
+            if (soul.y < soul.size/2) soul.y = soul.size/2;
+            if (soul.y > canvas.height - soul.size) soul.y = canvas.height - soul.size;
+        }
+
+        // ダメージ処理
+        let invulnerable = 0;
+        function takeDamage() {
+            if (invulnerable > 0) return;
+            hp -= 4;
+            invulnerable = 30; // 30フレーム無敵
+            
+            // UI更新
+            hpText.innerText = `${Math.max(0, hp)} / ${maxHp}`;
+            hpFill.style.width = `${Math.max(0, (hp / maxHp) * 100)}%`;
+            
+            // 点滅エフェクト
+            const soulElement = document.getElementById('enemy-area');
+            soulElement.classList.remove('damage-flash');
+            void soulElement.offsetWidth; // リフロー強制
+            soulElement.classList.add('damage-flash');
+
+            if (hp <= 0) {
+                gameOver();
+            }
+        }
+
+        function gameOver() {
+            isBattling = false;
+            cancelAnimationFrame(animationId);
+            gameOverScreen.style.display = 'flex';
+        }
+
+        // メインゲームループ
+        function update() {
+            if (!isBattling) return;
+
+            // 画面クリア
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // プレイヤー移動処理
+            if (keys.ArrowUp) soul.y -= soul.speed;
+            if (keys.ArrowDown) soul.y += soul.speed;
+            if (keys.ArrowLeft) soul.x -= soul.speed;
+            if (keys.ArrowRight) soul.x += soul.speed;
+            clampSoul();
+
+            // 敵の攻撃（弾の生成） - 涙が降ってくるイメージ
+            if (battleTimer % 15 === 0) {
+                bullets.push({
+                    x: Math.random() * canvas.width,
+                    y: -10,
+                    size: 6,
+                    speedY: 2 + Math.random() * 3,
+                    speedX: (Math.random() - 0.5) * 2
+                });
+            }
+
+            // 弾の更新と描画
+            ctx.fillStyle = 'white';
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                let b = bullets[i];
+                b.y += b.speedY;
+                b.x += b.speedX;
+                
+                // 丸い弾（涙）を描画
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 画面外に出た弾を削除
+                if (b.y > canvas.height + 10) {
+                    bullets.splice(i, 1);
+                    continue;
+                }
+
+                // 当たり判定 (シンプルな円形と点の距離)
+                let dx = soul.x - b.x;
+                let dy = (soul.y + soul.size/2) - b.y; // ハートの中心あたり
+                let distance = Math.sqrt(dx*dx + dy*dy);
+                
+                if (distance < b.size + (soul.size/2) - 2) {
+                    takeDamage();
+                }
+            }
+
+            // 無敵時間の点滅
+            if (invulnerable > 0) {
+                invulnerable--;
+                if (invulnerable % 4 < 2) {
+                    drawHeart(soul.x, soul.y, soul.size);
+                }
+            } else {
+                drawHeart(soul.x, soul.y, soul.size);
+            }
+
+            battleTimer++;
+            if (battleTimer >= battleDuration) {
+                endBattle();
+            } else {
+                animationId = requestAnimationFrame(update);
+            }
+        }
+        
+        // 初期設定
+        window.addEventListener('resize', resizeCanvas);
+    </script>
+</body>
+</html>
